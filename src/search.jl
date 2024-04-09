@@ -1,0 +1,306 @@
+struct Table
+    sliced_inds::Dict{Set, Set}
+    past_sliced_inds::Dict{Set, Dict}
+    costs::Dict{Set, Dict}
+    paths::Dict{Set, Dict}
+    max_sizes::Dict{Set, Dict}
+end
+
+"""
+    get_slicing_cost(tn, config, table, Ta, Tb, Ia, Ib) -> Tuple
+
+Get the cost of the intermediate tensors Ta and Tb with the sliced indices Ia and Ib.
+"""
+function get_slicing_cost(tn::TensorNetwork, config::SearchOptions, table::Table, Ta::Set, Tb::Set, Ia::Set, Ib::Set)
+    # calculate each set of indices of Ta, Tb and Tab
+    idxa = get_index(tn.inputs, Ta)
+    idxb = get_index(tn.inputs, Tb)
+    idx_inner = intersect(idxa, idxb)
+    idxa_outer = setdiff(idxa, idx_inner)
+    idxb_outer = setdiff(idxb, idx_inner)
+    idx_outer = symdiff(idxa, idxb)
+    idx_union = union(idxa, idxb)
+
+    # find inner sliced indices of Ia and Ib
+    Ia_inner = intersect(Ia, idx_inner)
+    Ib_inner = intersect(Ib, idx_inner)
+    # If inner sliced indices do not agree, return nothing
+    if Ia_inner != Ib_inner
+        return (nothing, nothing, nothing)
+    end
+
+    # find outer sliced indices of Ia and Ib
+    Ia_outer = intersect(Ia, idxa_outer)
+    Ib_outer = intersect(Ib, idxb_outer)
+    total_idx_outer = setdiff(idx_outer, union(Ia_outer, Ib_outer))
+
+    # find past sliced indices of Ia and Ib
+    Ia_past = setdiff(Ia, union(Ia_inner, Ia_outer))
+    Ib_past = setdiff(Ib, union(Ib_inner, Ib_outer))
+    
+    # get the contraction cost of Tab
+    cost = get_bdim(idx_union, tn.size_dict)
+    if cost == 1
+        cost = 0
+    end
+
+    # get the size of the sliced intermediate tensor
+    intermediate_size = get_bdim(total_idx_outer, tn.size_dict)
+    if isnothing(config.max_size) || compare_cost(intermediate_size, config.max_size) >= 0
+        if !config.use_cache
+            # calculate the slicing overhead in case of using no cache
+            slicing_overheada = get_bdim(union(Ib_outer, Ib_past), tn.size_dict)
+            slicing_overheadb = get_bdim(union(Ia_outer, Ia_past), tn.size_dict)
+            slicing_overhead_past = get_bdim(union(Ia_past, Ib_past), tn.size_dict)
+            total_cost = slicing_overhead_past * cost + slicing_overheada * table.costs[Ta][Ia] + slicing_overheadb * table.costs[Tb][Ib]
+            # if the total cost exceeds the max_cost, then return nothing
+            if !isnothing(config.max_cost) && compare_cost(config.max_cost, total_cost) == 1
+                return (nothing, nothing, nothing)
+            end
+            return (total_cost, intermediate_size, union(Ia, Ib))
+        else
+            # calculate the slicing overhead in case of using cache
+            slicing_overheada = get_bdim(Ib_outer, tn.size_dict)
+            slicing_overheadb = get_bdim(Ia_outer, tn.size_dict)
+            total_cost = cost + slicing_overheada * table.costs[Ta][Ia] + slicing_overheadb * table.costs[Tb][Ib]
+            # if the total cost exceeds the max_cost, then return nothing
+            if !isnothing(max_cost) && compare_cost(max_cost, total_cost) == 1
+                return (nothing, nothing, nothing)
+            end
+            return (total_cost, intermediate_size, symdiff(Ia, Ib))
+        end
+    else
+        return (nothing, nothing, nothing)
+    end
+end
+
+"""
+    initialize_table(tn, config, table)
+
+Initialize the table for the bfs.
+"""
+function initialize_table(tn::TensorNetwork, config::SearchOptions, table::Table)
+    N = length(tn.inputs)
+    # initialization
+    for i in 1:N
+        key = Set([i])
+        table.sliced_inds[key], table.past_sliced_inds[key], table.costs[key], table.paths[key], table.max_sizes[key] = Set(), Dict(), Dict(), Dict(), Dict()
+
+        inds = get_index(tn.inputs, key)
+
+        # iterate over the number of sliced indices
+        for r in 0:length(inds)
+            # if r exceeds the max_slice, then break
+            if !isnothing(config.max_slice) && r > config.max_slice
+                break
+            end
+            # iterate over the sliced indices with size r
+            for s in combinations(collect(inds), r)
+                s_set = Set(s)
+                # if the initial size of tensor already exceeds the max_size, then skip
+                if !isnothing(config.max_size) && compare_cost(config.max_size, get_bdim(setdiff(Set(inds), s_set), tn.size_dict)) == 1
+                    continue
+                end
+                # check the parallel edges
+                if !check_parallel_edges(tn.parallel_edges, inds, s_set)
+                    continue
+                end
+                push!(table.sliced_inds[key], Set(s))
+                table.past_sliced_inds[key][Set(s)] = s_set
+                table.costs[key][Set(s)] = 0
+                table.paths[key][Set(s)] = (i,)
+                table.max_sizes[key][Set(s)] = get_bdim(setdiff(Set(inds), s_set), tn.size_dict)
+            end
+            # if config.maxsize is nothing, then break (we don't care about slicing)
+            if r == 0 && isnothing(config.max_size)
+                break
+            end
+        end
+    end
+end
+
+"""
+    update_intermediate_tensor(tn, config, table, Ta, Tb)
+
+Update the table of intermediate tensor Tab given Ta and Tb.
+"""
+function update_intermediate_tensor(tn::TensorNetwork, config::SearchOptions, table::Table, Ta::Set, Tb::Set)
+    Tab = union(Ta, Tb)
+
+    # update intermediate tensors
+    for Ia in table.sliced_inds[Ta]
+        for Ib in table.sliced_inds[Tb]
+            # limit the number of sliced indices
+            if !isnothing(config.max_slice) && length(union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib])) > config.max_slice
+                continue
+            end
+
+            # use the symetric property of the edges
+            if !check_parallel_edges(tn.parallel_edges, get_all_index(tn.inputs, Tab), union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib]))
+                continue
+            end
+            
+            # get the cost of the intermediate tensor
+            new_cost, new_size, Iab = get_slicing_cost(tn, config, table, Ta, Tb, Ia, Ib)
+            if isnothing(new_cost)
+                continue
+            end
+
+            # if Tab is not in the table, then initialize it
+            if !haskey(table.sliced_inds, Tab)
+                table.sliced_inds[Tab] = Set()
+                table.past_sliced_inds[Tab] = Dict()
+                table.costs[Tab] = Dict()
+                table.paths[Tab] = Dict()
+                table.max_sizes[Tab] = Dict()
+            end
+
+            # calculate the size of contracting Tab
+            if compare_cost(new_size, table.max_sizes[Ta][Ia]) == 1
+                new_size = table.max_sizes[Ta][Ia]
+            end
+            if compare_cost(new_size, table.max_sizes[Tb][Ib]) == 1
+                new_size = table.max_sizes[Tb][Ib]
+            end
+
+            if !(Iab in table.sliced_inds[Tab])
+                # if Iab is not in the table, then add it
+                push!(table.sliced_inds[Tab], union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib]))
+                table.past_sliced_inds[Tab][Iab] = union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib])
+                table.costs[Tab][Iab] = new_cost
+                table.paths[Tab][Iab] = (table.paths[Ta][Ia], table.paths[Tb][Ib])
+                table.max_sizes[Tab][Iab] = new_size
+                continue
+            else
+                # If Iab is in the table, compare cost and size with the existing one and update it.
+                cost_compare_result = compare_cost(new_cost, table.costs[Tab][Iab])
+                size_compare_result = compare_cost(new_size, table.max_sizes[Tab][Iab])
+                slice_compare_result = compare_cost_int(length(union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib])), length(table.past_sliced_inds[Tab][Iab]))
+                # update if
+                # 1. new_cost < table.costs[Tab][Iab]
+                # 2. new_cost == table.costs[Tab][Iab] && new_size < table.max_sizes[Tab][Iab]
+                # 3. new_cost == table.costs[Tab][Iab] && new_size == table.max_sizes[Tab][Iab] && # of sliced indices is smaller
+                if cost_compare_result == 1 || (cost_compare_result == 0 && slice_compare_result == 1) || (cost_compare_result == 0 && slice_compare_result == 0 && size_compare_result == 1)
+                    table.past_sliced_inds[Tab][Iab] = union(table.past_sliced_inds[Ta][Ia], table.past_sliced_inds[Tb][Ib])
+                    table.costs[Tab][Iab] = new_cost
+                    table.paths[Tab][Iab] = (table.paths[Ta][Ia], table.paths[Tb][Ib])
+                    table.max_sizes[Tab][Iab] = new_size
+                end
+            end
+        end
+    end
+end
+
+"""
+    update_table(tn, config, table)
+
+Update the table of intermediate tensors.
+"""
+function update_table(tn::TensorNetwork, config::SearchOptions, table::Table)
+    N = length(tn.inputs)
+    intermediates = [i == 1 ? Set([Set([i]) for i in 1:N]) : Set() for i in 1:N]
+    # iterate over the number of intermediate tensors
+    for c in 2:N
+        dmax = c ÷ 2
+        # contract size_d tensor and size_e tensor to create size_c tensor (d <= e)
+        for d in 1:dmax
+            e = c - d
+            println("create $c tensor using $d and $e")
+            pairs = []
+            if d < e
+                pairs = [(x, y) for x in intermediates[d] for y in intermediates[e]]
+            else
+                intermediate_d = collect(intermediates[d])
+                pairs = [(intermediate_d[i], intermediate_d[j]) for i in 1:length(intermediate_d) for j in i:length(intermediate_d)]
+            end
+            for (Ta, Tb) in pairs
+                # continue if Ta and Tb share the same tensor.
+                if length(intersect(Ta, Tb)) > 0
+                    continue
+                end
+                # continue if Ta and Tb have no common index.
+                if config.restrict_outer_product && length(intersect(get_index(tn.inputs, Ta), get_index(tn.inputs, Tb))) == 0
+                    continue
+                end
+                # update the table of intermediate tensor Tab
+                update_intermediate_tensor(tn, config, table, Ta, Tb)
+                Tab = union(Ta, Tb)
+                if Tab in keys(table.costs)
+                    push!(intermediates[c], Tab)
+                end
+            end
+        end
+        num_candidates = 0
+        for Tab in keys(table.costs)
+            if length(Tab) == c
+                if length(table.costs[Tab]) > 0
+                    num_candidates += length(table.costs[Tab])
+                end
+            end
+        end
+        println("# candidates of size $c: $num_candidates")
+    end
+end
+
+"""
+    get_best_results(tn, config, table) -> Tuple
+
+Get the optimal result of contracting the final tensor from the table.
+"""
+function get_best_results(tn::TensorNetwork, config::SearchOptions, table::Table)
+    N = length(tn.inputs)
+    best_cost = nothing
+    best_path = nothing
+    best_max_sizes = nothing
+    best_slices = nothing
+
+    for key in keys(table.costs[Set(1:N)])
+        if !isnothing(best_cost)
+            cost_compare_result = compare_cost(table.costs[Set(1:N)][key], best_cost)
+        end
+        # update if
+        # 1. best_cost is nothing
+        # 2. table.costs[Set(1:N)][key] < best_cost
+        # 3. table.costs[Set(1:N)][key] == best_cost && # of sliced indices is smaller
+        if isnothing(best_cost) || cost_compare_result == 1 || (cost_compare_result == 0 && length(best_slices) > length(table.past_sliced_inds[Set(1:N)][key]))
+            best_cost = table.costs[Set(1:N)][key]
+            best_path = table.paths[Set(1:N)][key]
+            best_max_sizes = table.max_sizes[Set(1:N)][key]
+            best_slices = table.past_sliced_inds[Set(1:N)][key]
+        end
+    end
+
+    return best_cost, best_path, best_max_sizes, best_slices
+end
+
+"""
+    search(tn, config)
+
+Search the optimal contraction path and slicing of the tensor network.
+"""
+function search(tn::TensorNetwork, config::SearchOptions)
+    N = length(tn.inputs)
+
+    # define the table
+    table = Table(Dict(), Dict(), Dict(), Dict(), Dict())
+
+    # initialize the table
+    initialize_table(tn, config, table)
+
+    # update the table
+    update_table(tn, config, table)
+
+    # get the best results
+    best_cost, best_path, best_max_sizes, best_slices = get_best_results(tn, config, table)
+    println("best_cost: ", best_cost, " best_path: ", best_path, " best_max_sizes: ", best_max_sizes, " best_slices: ", best_slices)
+end
+
+"""
+    search(tn_name::String)
+
+Search the optimal contraction path and slicing of the tensor network with the given name.
+"""
+function search(tn_name::String)
+    tn, config = create_TN(tn_name)
+    search(tn, config)
+end

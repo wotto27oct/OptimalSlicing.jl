@@ -1,5 +1,12 @@
 module OptimalSlicing
 
-# Write your package code here.
+using Polynomials
+using Combinatorics
+
+include("tn.jl")
+export create_TN
+include("helpers.jl")
+include("search.jl")
+export search
 
 end

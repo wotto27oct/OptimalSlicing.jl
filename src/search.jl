@@ -251,7 +251,7 @@ function get_best_results(tn::TensorNetwork, config::SearchOptions, table::Table
     N = length(tn.inputs)
     best_cost = nothing
     best_path = nothing
-    best_max_sizes = nothing
+    best_max_size = nothing
     best_slices = nothing
 
     for key in keys(table.costs[Set(1:N)])
@@ -265,12 +265,12 @@ function get_best_results(tn::TensorNetwork, config::SearchOptions, table::Table
         if isnothing(best_cost) || cost_compare_result == 1 || (cost_compare_result == 0 && length(best_slices) > length(table.past_sliced_inds[Set(1:N)][key]))
             best_cost = table.costs[Set(1:N)][key]
             best_path = table.paths[Set(1:N)][key]
-            best_max_sizes = table.max_sizes[Set(1:N)][key]
+            best_max_size = table.max_sizes[Set(1:N)][key]
             best_slices = table.past_sliced_inds[Set(1:N)][key]
         end
     end
 
-    return best_cost, best_path, best_max_sizes, best_slices
+    return best_cost, best_path, best_max_size, best_slices
 end
 
 """
@@ -291,8 +291,9 @@ function search(tn::TensorNetwork, config::SearchOptions)
     update_table(tn, config, table)
 
     # get the best results
-    best_cost, best_path, best_max_sizes, best_slices = get_best_results(tn, config, table)
-    println("best_cost: ", best_cost, " best_path: ", best_path, " best_max_sizes: ", best_max_sizes, " best_slices: ", best_slices)
+    best_cost, best_path, best_max_size, best_slices = get_best_results(tn, config, table)
+    println("best_cost: ", best_cost, " best_path: ", best_path, " best_max_size: ", best_max_size, " best_slices: ", best_slices)
+    return best_cost, best_path, best_max_size, best_slices
 end
 
 """
@@ -302,5 +303,6 @@ Search the optimal contraction path and slicing of the tensor network with the g
 """
 function search(tn_name::String)
     tn, config = create_TN(tn_name)
-    search(tn, config)
+    best_cost, best_path, best_max_size, best_slices = search(tn, config)
+    return best_cost, best_path, best_max_size, best_slices
 end

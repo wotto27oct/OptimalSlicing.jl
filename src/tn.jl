@@ -27,7 +27,7 @@ function create_3_1_1DTTN()
     inputs = [['b', 'f', 'g', 'h'], ['e', 'f', 'i', 'j'], ['c', 'd', 'i', 'k'], ['j', 'g', 'h', 'l'], ['a', 'b', 'k', 'l']]
     output = ['a', 'c', 'd', 'e']
     parallel_edges = [['c', 'd'], ['g', 'h']]
-    max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 1])
+    max_cost = Polynomial([0, 0, 0, 0, 0, 0, 4])
     max_size = Polynomial([0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
     search_config = SearchOptions(max_cost, max_size, 0, false, false)

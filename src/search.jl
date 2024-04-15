@@ -243,6 +243,64 @@ function update_table(tn::TensorNetwork, config::SearchOptions, table::Table)
 end
 
 """
+    nested_to_ssa(nested_path::Tuple, N::Int) -> Array{Tuple{Int, Int}, 1}
+
+Convert the nested path to the ssa (single static assignment) path.
+
+Example:
+    nested_to_ssa (((3,), (2,)), ((5,), ((1,), (4,)))) -> [(2, 1), (0, 3), (4, 6), (5, 7)]
+"""
+function nested_to_ssa(nested_path::Tuple, N::Int)
+    ssa_path = Tuple{Int, Int}[]
+    function recursive(p::Tuple, node_num::Int)
+        if length(p) == 1
+            return p[1]
+        else
+            left = recursive(p[1], node_num)
+            right = recursive(p[2], max(left, node_num))
+            push!(ssa_path, (left, right))
+            if left <= N && right <= N
+                return node_num + 1
+            else
+                return max(left, right) + 1
+            end
+        end
+    end
+    recursive(nested_path, N)
+    return ssa_path
+end
+
+"""
+    ssa_to_linear(ssa_path::Array{Tuple{Int, Int}, 1}) -> Array{Tuple{Int, Int}, 1}
+
+Convert the ssa (single static assignment) path to the linear path (conventional contraction path).
+"""
+function ssa_to_linear(ssa_path::Array{Tuple{Int, Int}, 1})
+    max_ssa_id = maximum(maximum.(ssa_path))
+    ids = collect(1:max_ssa_id+1)
+
+    path = Tuple{Int, Int}[]
+    for ssa_ids in ssa_path
+        current_pair = Tuple(ids[ssa_id] for ssa_id in ssa_ids)
+        push!(path, current_pair)
+
+        for ssa_id in ssa_ids
+            ids[ssa_id:end] .-= 1
+        end
+    end
+    return path
+end
+
+"""
+    path_to_0_indexed(path::Array{Tuple{Int, Int}, 1}) -> Array{Tuple{Int, Int}, 1}
+
+Convert the path to the 0-indexed path.
+"""
+function path_to_0_indexed(path::Array{Tuple{Int, Int}, 1})
+    return [(a-1, b-1) for (a, b) in path]
+end
+
+"""
     get_best_results(tn, config, table) -> Tuple
 
 Get the optimal result of contracting the final tensor from the table.
@@ -250,8 +308,8 @@ Get the optimal result of contracting the final tensor from the table.
 function get_best_results(tn::TensorNetwork, config::SearchOptions, table::Table)
     N = length(tn.inputs)
     best_cost = nothing
-    best_path = nothing
     best_max_size = nothing
+    best_path = nothing
     best_slices = nothing
 
     for key in keys(table.costs[Set(1:N)])
@@ -270,7 +328,108 @@ function get_best_results(tn::TensorNetwork, config::SearchOptions, table::Table
         end
     end
 
-    return best_cost, best_path, best_max_size, best_slices
+    return best_cost, best_max_size, best_path, best_slices
+end
+
+struct PathInfo
+    cost::Polynomial
+    max_size::Polynomial
+    path::Array{Tuple{Int, Int}, 1}
+    slices::Set{Char}
+end
+
+function format_pathinfo(pathinfo::PathInfo)
+    path_print = "Results:\n"
+    path_print *= "cost: $(pathinfo.cost)\n"
+    path_print *= "max_size: $(pathinfo.max_size)\n"
+    path_print *= "linear path: $(pathinfo.path)\n"
+    path_print *= "slices: $(pathinfo.slices)\n"
+    return path_print
+end
+
+struct LineInfo
+    order::String
+    left_indices::String
+    right_indices::String
+    output_indices::String
+    blas_cost::String
+    slice_cost::String
+    blas_size::String
+end
+
+function print_path(tn::TensorNetwork, pathinfo::PathInfo)
+    path_print = "Contraction Details:\n"
+    tensor_indices = copy(tn.inputs)
+
+    function decorate_sliced_inds(indices)
+        index_str = ""
+        for index in indices
+            if index in pathinfo.slices
+                index_str *= "{$index}"
+            else
+                index_str *= string(index)
+            end
+        end
+        return index_str
+    end
+
+    line_info_list = LineInfo[]
+    push!(line_info_list, LineInfo("", "left", "right", "output", "blas cost", "slicing overhead", "blas size"))
+
+    slice_cost = get_bdim(pathinfo.slices, tn.size_dict)
+
+    for (i, (a, b)) in enumerate(pathinfo.path)
+        left_indices = decorate_sliced_inds(tensor_indices[a+1])
+        right_indices = decorate_sliced_inds(tensor_indices[b+1])
+        output = symdiff(tensor_indices[a+1], tensor_indices[b+1])
+        blas_cost = get_bdim(Set(setdiff(union(tensor_indices[a+1], tensor_indices[b+1]), pathinfo.slices)), tn.size_dict)
+        blas_size = [get_bdim(Set(setdiff(tensor_indices[a+1], pathinfo.slices)), tn.size_dict), get_bdim(Set(setdiff(tensor_indices[a+1], pathinfo.slices)), tn.size_dict), get_bdim(Set(setdiff(output, pathinfo.slices)), tn.size_dict)]
+        output_indices = decorate_sliced_inds(output)
+        push!(line_info_list, LineInfo(string(i), left_indices, right_indices, output_indices, string(blas_cost), string(slice_cost), "$(blas_size[1]), $(blas_size[2]) -> $(blas_size[3])"))
+        deleteat!(tensor_indices, sort([a+1, b+1]))
+        push!(tensor_indices, output)
+    end
+
+    function get_max_length(line_info_list::Vector{LineInfo}, field::Symbol)::Int
+        max_length = 0
+        for line_info in line_info_list
+            field_value = getfield(line_info, field)
+            max_length = max(max_length, length(field_value))
+        end
+        return max_length
+    end
+
+    lengths = (max(3, get_max_length(line_info_list, :order)+2),
+                max(10, get_max_length(line_info_list, :left_indices)+2),
+                max(10, get_max_length(line_info_list, :right_indices)+2),
+                max(10, get_max_length(line_info_list, :output_indices)+2),
+                max(10, get_max_length(line_info_list, :blas_cost)+2),
+                max(10, get_max_length(line_info_list, :slice_cost)+2),
+                max(10, get_max_length(line_info_list, :blas_size)+2))
+
+    function format_path(line_info)
+        fe = FormatExpr(join(["{:<$(lengths[i])}" for i in 1:length(lengths)], " ") * "\n")
+        formatted_string = format(fe, line_info.order, line_info.left_indices, line_info.right_indices, line_info.output_indices, line_info.blas_cost, line_info.slice_cost, line_info.blas_size)
+        return formatted_string
+    end
+
+    for line_info in line_info_list
+        path_print *= format_path(line_info)
+    end
+    return path_print
+end
+
+function print_contraction(tn::TensorNetwork, config::SearchOptions, pathinfo::PathInfo)
+    path_print = ""
+    path_print *= "----------------------------------------\n"
+    path_print *= format_tensor_network(tn)
+    path_print *= "----------------------------------------\n"
+    path_print *= format_search_options(config)
+    path_print *= "----------------------------------------\n"
+    path_print *= format_pathinfo(pathinfo)
+    path_print *= "----------------------------------------\n"
+    path_print *= print_path(tn, pathinfo)
+    return path_print
 end
 
 """
@@ -291,9 +450,15 @@ function search(tn::TensorNetwork, config::SearchOptions)
     update_table(tn, config, table)
 
     # get the best results
-    best_cost, best_path, best_max_size, best_slices = get_best_results(tn, config, table)
-    println("best_cost: ", best_cost, " best_path: ", best_path, " best_max_size: ", best_max_size, " best_slices: ", best_slices)
-    return best_cost, best_path, best_max_size, best_slices
+    best_cost, best_max_size,  best_path, best_slices = get_best_results(tn, config, table)
+    #println("best_cost: ", best_cost, " best_max_size: ", best_max_size, " best_path: ", best_path, " best_slices: ", best_slices)
+    ssa_path = nested_to_ssa(best_path, N)
+    #println("ssa_path: ", ssa_path)
+    linear_path = ssa_to_linear(ssa_path)
+    #println("linear_path: ", linear_path)
+    pathinfo::PathInfo = PathInfo(best_cost, best_max_size, path_to_0_indexed(linear_path), best_slices)
+    path_print = print_contraction(tn, config, pathinfo)
+    return pathinfo, path_print
 end
 
 """
@@ -303,6 +468,5 @@ Search the optimal contraction path and slicing of the tensor network with the g
 """
 function search(tn_name::String)
     tn, config = create_TN(tn_name)
-    best_cost, best_path, best_max_size, best_slices = search(tn, config)
-    return best_cost, best_path, best_max_size, best_slices
+    return search(tn, config)
 end

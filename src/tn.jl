@@ -5,12 +5,29 @@ struct TensorNetwork
     parallel_edges::Array{Array{Char, 1}, 1}
 end
 
+function format_tensor_network(tn::TensorNetwork)::String
+    # format tensor network in python style
+    inputs_str = "[" * join(["['" * join(input, "', '") * "']" for input in tn.inputs], ", ") * "]"
+    output_str = "['" * join(tn.output, "', '") * "']"
+    size_dict_str = "{" * join(["'$(key)': $(value)" for (key, value) in tn.size_dict], ", ") * "}"
+    
+    return "Tensor Network Info:\ninputs = $inputs_str\noutput = $output_str\nsize_dict = $size_dict_str\n"
+end
+
 mutable struct SearchOptions
     max_cost::Union{Polynomial, Nothing}
     max_size::Union{Polynomial, Nothing}
     max_slice::Union{Int, Nothing}
     restrict_outer_product::Bool
     use_cache::Bool
+end
+
+function format_search_options(config::SearchOptions)::String
+    max_cost_str = config.max_cost == nothing ? "nothing" : "$(config.max_cost)"
+    max_size_str = config.max_size == nothing ? "nothing" : "$(config.max_size)"
+    max_slice_str = config.max_slice == nothing ? "nothing" : "$(config.max_slice)"
+    
+    return "Search Options:\nmax_cost = $max_cost_str\nmax_size = $max_size_str\nmax_slice = $max_slice_str\nrestrict_outer_product = $(config.restrict_outer_product)\nuse_cache = $(config.use_cache)\n"
 end
 
 function generate_size_dict(inputs)

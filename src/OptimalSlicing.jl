@@ -2,6 +2,7 @@ module OptimalSlicing
 
 using Polynomials
 using Combinatorics
+using Format
 
 include("tn.jl")
 export create_TN

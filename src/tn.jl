@@ -57,6 +57,17 @@ function check_tn_definition(inputs::Array{Array{Int,1},1}, output::Array{Int,1}
     return true
 end
 
+function get_symbol(i::Int)::Char
+    _einsum_symbols_base = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if i < 52
+        return _einsum_symbols_base[i+1]
+    elseif i >= 55296
+        return Char(i + 2048)
+    else
+        return Char(i + 140)
+    end
+end
+
 function create_3_1_1DTTN()
     inputs = [['b', 'f', 'g', 'h'], ['e', 'f', 'i', 'j'], ['c', 'd', 'i', 'k'], ['j', 'g', 'h', 'l'], ['a', 'b', 'k', 'l']]
     output = ['a', 'c', 'd', 'e']
@@ -99,26 +110,11 @@ function create_9_1_2DTTN()
     # ['d', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'], ['m', 't', 'F', 'w', 'G', 'H', 'I', 'J'], 
     # ['e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'G', 'K'], ['n', 'o', 'p', 'q', 'r', 's', 'H', 'u', 'v', 'L'], 
     # ['M', 'N', 'I', 'O', 'P', 'Q', 'R', 'S', 'T', 'U'], ['J', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'V'], ['a', 'b', 'c', 'd', 'K', 'L', 'U', 'V']]
+    inputs = [[get_symbol(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
     output = [2,38,39,31,40,41,42,43,44,45]
-    for i in 1:length(inputs)
-        for j in 1:length(inputs[i])
-            inputs[i][j] = inputs[i][j] + Int('A')
-        end
-    end
-    inputs = [[Char(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
-    for i in 1:length(output)
-        output[i] = output[i] + Int('A')
-    end
-    output = [Char(i) for i in output]
-    #parallel_edges = [['e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'], ['n', 'o', 'p', 'q', 'r', 's', 'u', 'v'],
-    #                ['x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'], ['M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']]
+    output = [get_symbol(i) for i in output]
     parallel_edges = [[4,5,6,7,8,9,10,11], [13,14,15,16,17,18,20,21], [23,24,25,26,27,28,29,30], [38,39,40,41,42,43,44,45]]
-    for i in 1:length(parallel_edges)
-        for j in 1:length(parallel_edges[i])
-            parallel_edges[i][j] = parallel_edges[i][j] + Int('A')
-        end
-    end
-    parallel_edges = [[Char(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
+    parallel_edges = [[get_symbol(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 4])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
@@ -157,23 +153,10 @@ function create_9_1_2DMERA()
               [64,37,41,45,60,61,62,63]]
     output = [58,59,4,18,31,64]
     check_tn_definition(inputs, output)
-    for i in 1:length(inputs)
-        for j in 1:length(inputs[i])
-            inputs[i][j] = inputs[i][j] + Int('A')
-        end
-    end
-    inputs = [[Char(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
-    for i in 1:length(output)
-        output[i] = output[i] + Int('A')
-    end
-    output = [Char(i) for i in output]
+    inputs = [[get_symbol(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
+    output = [get_symbol(i) for i in output]
     parallel_edges = [[33,36],[38,40],[43,44],[58,59]]
-    for i in 1:length(parallel_edges)
-        for j in 1:length(parallel_edges[i])
-            parallel_edges[i][j] = parallel_edges[i][j] + Int('A')
-        end
-    end
-    parallel_edges = [[Char(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
+    parallel_edges = [[get_symbol(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 0, 1, 1, 3, 0, 3])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)

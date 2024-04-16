@@ -10,8 +10,8 @@ function format_tensor_network(tn::TensorNetwork)::String
     inputs_str = "[" * join(["['" * join(input, "', '") * "']" for input in tn.inputs], ", ") * "]"
     output_str = "['" * join(tn.output, "', '") * "']"
     size_dict_str = "{" * join(["'$(key)': $(value)" for (key, value) in tn.size_dict], ", ") * "}"
-    
-    return "Tensor Network Info:\ninputs = $inputs_str\noutput = $output_str\nsize_dict = $size_dict_str\n"
+    parallel_edges_str = "[" * join(["['" * join(edge, "', '") * "']" for edge in tn.parallel_edges], ", ") * "]"
+    return "Tensor Network Info:\ninputs = $inputs_str\noutput = $output_str\nsize_dict = $size_dict_str\nparallel_edges = $parallel_edges_str\n"
 end
 
 mutable struct SearchOptions
@@ -38,6 +38,23 @@ function generate_size_dict(inputs)
         end
     end
     return size_dict
+end
+
+function check_tn_definition(inputs::Array{Array{Int,1},1}, output::Array{Int,1})
+    all_elements = vcat([vcat(input) for input in inputs]..., output)
+    
+    element_counts = Dict{Int, Int}()
+    for element in all_elements
+        element_counts[element] = get(element_counts, element, 0) + 1
+    end
+    
+    for (element, count) in element_counts
+        if count != 2
+            println("Element $(element) appears $(count) times, but should appear exactly 2 times.")
+            return false
+        end
+    end
+    return true
 end
 
 function create_3_1_1DTTN()
@@ -85,16 +102,23 @@ function create_9_1_2DTTN()
     output = [2,38,39,31,40,41,42,43,44,45]
     for i in 1:length(inputs)
         for j in 1:length(inputs[i])
-            inputs[i][j] = inputs[i][j] + Int('a')
+            inputs[i][j] = inputs[i][j] + Int('A')
         end
     end
     inputs = [[Char(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
     for i in 1:length(output)
-        output[i] = output[i] + Int('a')
+        output[i] = output[i] + Int('A')
     end
     output = [Char(i) for i in output]
-    parallel_edges = [['e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'], ['n', 'o', 'p', 'q', 'r', 's', 'u', 'v'],
-                    ['x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'], ['M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']]
+    #parallel_edges = [['e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'], ['n', 'o', 'p', 'q', 'r', 's', 'u', 'v'],
+    #                ['x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'], ['M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T']]
+    parallel_edges = [[4,5,6,7,8,9,10,11], [13,14,15,16,17,18,20,21], [23,24,25,26,27,28,29,30], [38,39,40,41,42,43,44,45]]
+    for i in 1:length(parallel_edges)
+        for j in 1:length(parallel_edges[i])
+            parallel_edges[i][j] = parallel_edges[i][j] + Int('A')
+        end
+    end
+    parallel_edges = [[Char(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 4])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
@@ -102,10 +126,54 @@ function create_9_1_2DTTN()
     return tn, search_config
 end
 
-function create_2DMERA()
-    inputs = [['i', 'j', 'k', 'l', 'm', 'n', 'o', 'p'], ['l', 'q', 'r', 's', 't', 'u', 'v', 'w'], ['x', 'y', 'j', 't', 'z', 'A'], ['B', 'k', 'C', 'v', 'D', 'E'], ['u', 'F', 'G', 'H', 'I', 'J'], ['w', 'K', 'L', 'M', 'N', 'O'], ['P', 'Q', 'i', 'A', 'D', 'R'], ['S', 'z', 'T', 'U', 'I', 'V'], ['E', 'W', 'X', 'O', 'Y', 'Z'], ['J', 'N', 'À', 'Á', 'Â', 'Ã'], ['p', 'q', 'r', 's', 'Ä', 'Å', 'Æ', 'Ç'], ['x', 'y', 'n', 'Ä', 'È', 'É'], ['B', 'o', 'C', 'Æ', 'Ê', 'Ë'], ['Å', 'F', 'G', 'H', 'Ì', 'Í'], ['Ç', 'K', 'L', 'M', 'Î', 'Ï'], ['P', 'Q', 'm', 'É', 'Ê', 'Ð'], ['S', 'È', 'T', 'U', 'Ì', 'Ñ'], ['Ë', 'W', 'X', 'Ï', 'Y', 'Ò'], ['Í', 'Î', 'À', 'Á', 'Â', 'Ó']]
-    output = ['R', 'V', 'Z', 'Ã', 'Ð', 'Ñ', 'Ò', 'Ó']
-    parallel_edges = []
+function create_2_1_1DMERA()
+    inputs = [['a', 'd', 'e'], ['b', 'f', 'g'], ['c', 'h', 'i'], ['e', 'f', 'j', 'k'], ['g', 'h', 'l', 'm'], ['j', 'k', 'l', 'n', 'o', 'p'],
+                ['n', 'o', 'q', 'r'], ['p', 'm', 's', 't'], ['d', 'q', 'u'], ['r', 's', 'v'], ['t', 'i', 'w']]
+    output = ['a', 'b', 'c', 'u', 'v', 'w']
+    parallel_edges = [['a', 'u'], ['j', 'k'], ['n', 'o']]
+    max_cost = Polynomial([0, 0, 0, 0, 0, 2, 2, 0, 4, 2])
+    max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 1])
+    tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
+    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    return tn, search_config
+end
+
+function create_9_1_2DMERA()
+    #inputs = [['i', 'j', 'k', 'l', 'm', 'n', 'o', 'p'], ['l', 'q', 'r', 's', 't', 'u', 'v', 'w'], ['x', 'y', 'j', 't', 'z', 'A'], 
+    #        ['B', 'k', 'C', 'v', 'D', 'E'], ['u', 'F', 'G', 'H', 'I', 'J'], ['w', 'K', 'L', 'M', 'N', 'O'], 
+    #        ['P', 'Q', 'i', 'A', 'D', 'R'], ['S', 'z', 'T', 'U', 'I', 'V'], ['E', 'W', 'X', 'O', 'Y', 'Z'], 
+    #        ['J', 'N', 'À', 'Á', 'Â', 'Ã'], ['p', 'q', 'r', 's', 'Ä', 'Å', 'Æ', 'Ç'], ['x', 'y', 'n', 'Ä', 'È', 'É'], 
+    #        ['B', 'o', 'C', 'Æ', 'Ê', 'Ë'], ['Å', 'F', 'G', 'H', 'Ì', 'Í'], ['Ç', 'K', 'L', 'M', 'Î', 'Ï'], 
+    #        ['P', 'Q', 'm', 'É', 'Ê', 'Ð'], ['S', 'È', 'T', 'U', 'Ì', 'Ñ'], ['Ë', 'W', 'X', 'Ï', 'Y', 'Ò'], ['Í', 'Î', 'À', 'Á', 'Â', 'Ó']]
+    #output = ['R', 'V', 'Z', 'Ã', 'Ð', 'Ñ', 'Ò', 'Ó']
+    #parallel_edges = []
+    inputs = [[0,1,2,3,4,5,6,7],
+              [7,8,9,10,11,12,13,14],
+              [15,16,5,11,17,18],[19,20,21,12,22,23],[24,25,26,14,27,28],[29,6,30,13,31,32],
+              [33,17,35,36,23,37],[32,38,39,27,40,41],[22,28,42,43,44,45],
+              [3,8,9,10,46,47,48,49],
+              [15,16,1,46,50,51],[19,20,21,47,52,53],[24,25,26,49,54,55],[29,2,30,48,56,57],
+              [58,59,0,51,56,60],[33,50,35,36,53,61],[57,38,39,54,40,62],[52,55,42,43,44,63],
+              [64,37,41,45,60,61,62,63]]
+    output = [58,59,4,18,31,64]
+    check_tn_definition(inputs, output)
+    for i in 1:length(inputs)
+        for j in 1:length(inputs[i])
+            inputs[i][j] = inputs[i][j] + Int('A')
+        end
+    end
+    inputs = [[Char(inputs[i][j]) for j in 1:length(inputs[i])] for i in 1:length(inputs)]
+    for i in 1:length(output)
+        output[i] = output[i] + Int('A')
+    end
+    output = [Char(i) for i in output]
+    parallel_edges = [[33,36],[38,40],[43,44],[58,59]]
+    for i in 1:length(parallel_edges)
+        for j in 1:length(parallel_edges[i])
+            parallel_edges[i][j] = parallel_edges[i][j] + Int('A')
+        end
+    end
+    parallel_edges = [[Char(i) for i in parallel_edges[j]] for j in 1:length(parallel_edges)]
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 0, 1, 1, 3, 0, 3])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
@@ -218,8 +286,10 @@ function create_TN(name::String)
         return create_3_1_1DMERA()
     elseif name == "9_1_2DTTN"
         return create_9_1_2DTTN()
-    elseif name == "2DMERA"
-        return create_2DMERA()
+    elseif name == "2_1_1DMERA"
+        return create_2_1_1DMERA()
+    elseif name == "9_1_2DMERA"
+        return create_9_1_2DMERA()
     elseif name == "3_3_PEPS"
         return create_3_3_PEPS()
     elseif name == "3_3_periodic_PEPS"

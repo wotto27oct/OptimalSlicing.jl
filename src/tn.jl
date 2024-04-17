@@ -164,42 +164,89 @@ function create_9_1_2DMERA()
     return tn, search_config
 end
 
-function create_PEPS(height::Int, width::Int)
+function create_PEPS(distance::Int)
     inputs = []
-    buff = (height - 1) * width
-    for h in 0:height-1
-        for w in 0:width-1
+    buff = (distance - 1) * distance
+    for h in 0:distance-1
+        for w in 0:distance-1
             index = [] # up, right, down, left
             if h != 0
-                push!(index, (h-1)+w*(height-1))
+                push!(index, (h-1)+w*(distance-1))
             end
-            if w != width-1
-                push!(index, buff+w+h*(width-1))
+            if w != distance-1
+                push!(index, buff+w+h*(distance-1))
             end
-            if h != height-1
-                push!(index, h+w*(height-1))
+            if h != distance-1
+                push!(index, h+w*(distance-1))
             end
             if w != 0
-                push!(index, buff+(w-1)+h*(width-1))
+                push!(index, buff+(w-1)+h*(distance-1))
             end
-            push!(inputs, [Char(i+Int('a')) for i in index])
+            push!(inputs, [get_symbol(i) for i in index])
         end
     end
     output = []
-    return inputs, output, generate_size_dict(inputs)
-end
-
-function create_3_3_PEPS()
-    inputs, output, size_dict = create_PEPS(3, 3)
+    # symmetry
     parallel_edges = []
-    max_cost = Polynomial([0, 0, 2, 0, 4, 2, 1])
-    max_size = Polynomial([0, 0, 0, 0, 1])
-    tn = TensorNetwork(inputs, output, size_dict, parallel_edges)
+    push!(parallel_edges, [get_symbol(i) for i in [0, distance-2]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, (distance-1)^2]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, (distance-1)^2+distance-2]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, buff]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, buff+distance-2]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, buff+(distance-1)^2]])
+    push!(parallel_edges, [get_symbol(i) for i in [0, buff+(distance-1)^2+distance-2]])
+
+    if distance == 3
+        max_cost = Polynomial([0, 0, 2, 0, 4, 2, 1])
+        max_size = Polynomial([0, 0, 0, 0, 1])
+    elseif distance == 4
+        max_cost = Polynomial([0, 0, 1, 0, 4, 4, 6])
+        max_size = Polynomial([0, 0, 0, 0, 1])
+    else
+        max_cost = max_size = nothing
+    end
+
+    tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
     search_config = SearchOptions(max_cost, max_size, 0, false, false)
     return tn, search_config
 end
 
-function create_periodic_PEPS(height::Int, width::Int)
+function create_periodic_PEPS(distance::Int)
+    inputs = []
+    buff = distance ^ 2
+    for h in 0:distance-1
+        for w in 0:distance-1
+            index = [] # up, right, down, left
+            push!(index, ((h-1+distance)%distance)+w*distance)
+            push!(index, buff+w+h*distance)
+            push!(index, h+w*distance)
+            push!(index, buff+((w-1+distance)%distance)+h*distance)
+            push!(inputs, [get_symbol(i) for i in index])
+        end
+    end
+    # symmetry
+    parallel_edges = []
+    for i in 1:2*distance^2-1
+        push!(parallel_edges, [get_symbol(i) for i in [0, i]])
+    end
+    println(parallel_edges)
+    output = []
+    if distance == 3
+        max_cost = Polynomial([0, 0, 0, 0, 1, 0, 0, 3, 3, 1])
+        max_size = Polynomial([0, 0, 0, 0, 0, 0, 1])
+    elseif distance == 4
+        max_cost = Polynomial([0, 0, 0, 0, 1, 0, 0, 8, 0, 0, 4, 0, 2])
+        max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 1])
+    else
+        max_cost = max_size = nothing
+    end
+
+    tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
+    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    return tn, search_config
+end
+
+"""function create_periodic_PEPS(height::Int, width::Int)
     inputs = []
     buff = height * width
     for h in 0:height-1
@@ -214,7 +261,7 @@ function create_periodic_PEPS(height::Int, width::Int)
     end
     output = []
     return inputs, output, generate_size_dict(inputs)
-end
+end"""
 
 function create_3_3_periodic_PEPS()
     inputs, output, size_dict = create_periodic_PEPS(3, 3)
@@ -273,10 +320,33 @@ function create_TN(name::String)
         return create_2_1_1DMERA()
     elseif name == "9_1_2DMERA"
         return create_9_1_2DMERA()
-    elseif name == "3_3_PEPS"
-        return create_3_3_PEPS()
-    elseif name == "3_3_periodic_PEPS"
-        return create_3_3_periodic_PEPS()
+    elseif occursin("periodic_PEPS", name)
+        pattern = r"^(\d+)_(\d+)_periodic_PEPS$"
+        m = match(pattern, name)
+        if m !== nothing
+            width = parse(Int, m.captures[1])
+            height = parse(Int, m.captures[2])
+            if width != height
+                throw(ArgumentError("Width and height must be the same for periodic PEPS."))
+            end
+            return create_periodic_PEPS(width)
+        else
+            throw(ArgumentError("The string does not match the expected format."))
+        end
+    elseif occursin("PEPS", name)
+        pattern = r"^(\d+)_(\d+)_PEPS$"
+        m = match(pattern, "3_3_PEPS")
+        m = match(pattern, name)
+        if m !== nothing
+            width = parse(Int, m.captures[1])
+            height = parse(Int, m.captures[2])
+            if width != height
+                throw(ArgumentError("Width and height must be the same for PEPS."))
+            end
+            return create_PEPS(width)
+        else
+            throw(ArgumentError("The string does not match the expected format."))
+        end
     elseif name == "2DHOTRG"
         return create_2DHOTRG()
     elseif name == "3DHOTRG"

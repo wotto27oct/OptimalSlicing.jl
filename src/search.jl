@@ -291,6 +291,21 @@ function ssa_to_linear(ssa_path::Array{Tuple{Int, Int}, 1})
     return path
 end
 
+function linear_to_ssa(path::Array{Tuple{Int, Int}, 1})
+    N = length(path) + 1
+    ids = collect(0:N-1)
+    ssa = N
+    ssa_path = Tuple{Int, Int}[]
+    for con in path
+        sorted_con = sort(collect(con), rev=true)
+        scon = [popat!(ids, c+1) for c in sorted_con]
+        push!(ssa_path, tuple(scon...))
+        push!(ids, ssa)
+        ssa += 1
+    end
+    return ssa_path
+end
+
 """
     path_to_0_indexed(path::Array{Tuple{Int, Int}, 1}) -> Array{Tuple{Int, Int}, 1}
 
@@ -343,6 +358,7 @@ function format_pathinfo(pathinfo::PathInfo)
     path_print *= "cost: $(pathinfo.cost)\n"
     path_print *= "max_size: $(pathinfo.max_size)\n"
     path_print *= "linear path: $(pathinfo.path)\n"
+    path_print *= "ssa path: $(linear_to_ssa(pathinfo.path))\n"
     path_print *= "slices: $(pathinfo.slices)\n"
     return path_print
 end

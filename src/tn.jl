@@ -20,14 +20,26 @@ mutable struct SearchOptions
     max_slice::Union{Int, Nothing}
     restrict_outer_product::Bool
     use_cache::Bool
+    directory::Union{String, Nothing}
+
+    SearchOptions(; max_cost=nothing, max_size=nothing, max_slice=nothing, restrict_outer_product=false, use_cache=false, directory=nothing) = new(max_cost, max_size, max_slice, restrict_outer_product, use_cache, directory)
 end
 
 function format_search_options(config::SearchOptions)::String
     max_cost_str = config.max_cost == nothing ? "nothing" : "$(config.max_cost)"
     max_size_str = config.max_size == nothing ? "nothing" : "$(config.max_size)"
     max_slice_str = config.max_slice == nothing ? "nothing" : "$(config.max_slice)"
+    directory_str = config.directory == nothing ? "nothing" : "$(config.directory)"
     
-    return "Search Options:\nmax_cost = $max_cost_str\nmax_size = $max_size_str\nmax_slice = $max_slice_str\nrestrict_outer_product = $(config.restrict_outer_product)\nuse_cache = $(config.use_cache)\n"
+    return "Search Options:\nmax_cost = $max_cost_str\nmax_size = $max_size_str\nmax_slice = $max_slice_str\nrestrict_outer_product = $(config.restrict_outer_product)\nuse_cache = $(config.use_cache)\ndirectory = $(directory_str)\n"
+end
+
+function generate_hash(tn::TensorNetwork, options::SearchOptions)
+    tn_str = join([string(field) for field in (tn.inputs, tn.output, tn.size_dict, tn.parallel_edges)], "_")
+    options_str = join([string(field) for field in (options.max_cost, options.max_size, options.max_slice, options.restrict_outer_product, options.use_cache, options.directory)], "_")
+
+    combined_str = tn_str * "_" * options_str
+    return bytes2hex(sha1(combined_str))
 end
 
 function generate_size_dict(inputs)
@@ -75,7 +87,7 @@ function create_3_1_1DTTN()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 4])
     max_size = Polynomial([0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -88,7 +100,7 @@ function create_TEBD()
     max_cost = Polynomial([0, 0, 16, 10])
     max_size = Polynomial([0, 0, 4])
     tn = TensorNetwork(inputs, output, size_dict, parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -99,7 +111,7 @@ function create_3_1_1DMERA()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 2, 2, 2])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -118,7 +130,7 @@ function create_9_1_2DTTN()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 4])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -130,7 +142,7 @@ function create_2_1_1DMERA()
     max_cost = Polynomial([0, 0, 0, 0, 0, 2, 2, 0, 4, 2])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -160,7 +172,7 @@ function create_9_1_2DMERA()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 0, 1, 1, 3, 0, 3])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -207,7 +219,7 @@ function create_PEPS(distance::Int)
     end
 
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -242,7 +254,7 @@ function create_periodic_PEPS(distance::Int)
     end
 
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -269,7 +281,7 @@ function create_3_3_periodic_PEPS()
     max_cost = Polynomial([0, 0, 0, 0, 1, 0, 0, 3, 3, 1])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, size_dict, parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -280,7 +292,7 @@ function create_2DHOTRG()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 2, 1])
     max_size = Polynomial([0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -292,7 +304,7 @@ function create_3DHOTRG()
     parallel_edges = [['a', 'g'], ['c', 'd', 'e', 'f']]
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 
@@ -303,7 +315,7 @@ function create_4DHOTRG()
     max_cost = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1])
     max_size = Polynomial([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
     tn = TensorNetwork(inputs, output, generate_size_dict(inputs), parallel_edges)
-    search_config = SearchOptions(max_cost, max_size, 0, false, false)
+    search_config = SearchOptions(max_cost=max_cost, max_size=max_size, max_slice=0)
     return tn, search_config
 end
 

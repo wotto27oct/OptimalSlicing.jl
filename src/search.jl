@@ -6,6 +6,52 @@ struct Table
     max_sizes::Dict{Set, Dict}
 end
 
+function save_table_cache(tn::TensorNetwork, config::SearchOptions, table::Table, c::Int)
+    if config.directory !== nothing
+        hash_val = generate_hash(tn, config)
+        if !isdir(config.directory)
+            mkdir(config.directory)
+        end
+        cache_path = joinpath(config.directory, "cache_" * hash_val * "_$(c)")
+        open(cache_path, "w") do file
+            serialize(file, table)
+        end
+    end
+end
+
+function load_table_cache(tn::TensorNetwork, config::SearchOptions)::Tuple{Union{Table, Nothing}, Union{Int, Nothing}}
+    if config.directory !== nothing && isdir(config.directory)
+        # get the cached table that have the largest number c
+        files = readdir(config.directory)
+
+        hash_val = generate_hash(tn, config)
+        pattern = "cache_$(hash_val)_(\\d+)"
+        max_c = -1
+
+        for file in files
+            m = match(Regex(pattern), file)
+            if m != nothing
+                c_val = parse(Int, m.captures[1])
+                if c_val > max_c
+                    max_c = c_val
+                end
+            end
+        end
+
+        if max_c >= 0
+            cache_path = joinpath(config.directory, "cache_" * hash_val * "_$(max_c)")
+            open(cache_path, "r") do file
+                table_cache = deserialize(file)
+                return (table_cache, max_c)
+            end
+        else
+            return (nothing, nothing)
+        end
+    else 
+        return (nothing, nothing)
+    end
+end
+
 """
     get_slicing_cost(tn, config, table, Ta, Tb, Ia, Ib) -> Tuple
 
@@ -196,11 +242,22 @@ end
 
 Update the table of intermediate tensors.
 """
-function update_table(tn::TensorNetwork, config::SearchOptions, table::Table)
+function update_table(tn::TensorNetwork, config::SearchOptions, table::Table, c_max::Union{Int, Nothing})
     N = length(tn.inputs)
     intermediates = [i == 1 ? Set([Set([i]) for i in 1:N]) : Set() for i in 1:N]
+
+    if !isnothing(c_max)
+        for Tab in keys(table.costs)
+            push!(intermediates[length(Tab)], Tab)
+        end
+    end
+
     # iterate over the number of intermediate tensors
     for c in 2:N
+        if !isnothing(c_max) && c <= c_max
+            println("load cached table with c=$c")
+            continue
+        end
         dmax = c ÷ 2
         # contract size_d tensor and size_e tensor to create size_c tensor (d <= e)
         for d in 1:dmax
@@ -239,6 +296,7 @@ function update_table(tn::TensorNetwork, config::SearchOptions, table::Table)
             end
         end
         println("# candidates of size $c: $num_candidates")
+        save_table_cache(tn, config, table, c)
     end
 end
 
@@ -456,22 +514,22 @@ Search the optimal contraction path and slicing of the tensor network.
 function search(tn::TensorNetwork, config::SearchOptions)
     N = length(tn.inputs)
 
-    # define the table
-    table = Table(Dict(), Dict(), Dict(), Dict(), Dict())
-
-    # initialize the table
-    initialize_table(tn, config, table)
+    # load cached table
+    table, c_max = load_table_cache(tn, config)
+    if isnothing(table)
+        # define the table
+        table = Table(Dict(), Dict(), Dict(), Dict(), Dict())
+        # initialize the table
+        initialize_table(tn, config, table)
+    end
 
     # update the table
-    update_table(tn, config, table)
+    update_table(tn, config, table, c_max)
 
     # get the best results
     best_cost, best_max_size,  best_path, best_slices = get_best_results(tn, config, table)
-    #println("best_cost: ", best_cost, " best_max_size: ", best_max_size, " best_path: ", best_path, " best_slices: ", best_slices)
     ssa_path = nested_to_ssa(best_path, N)
-    #println("ssa_path: ", ssa_path)
     linear_path = ssa_to_linear(ssa_path)
-    #println("linear_path: ", linear_path)
     pathinfo::PathInfo = PathInfo(best_cost, best_max_size, path_to_0_indexed(linear_path), best_slices)
     path_print = print_contraction(tn, config, pathinfo)
     return pathinfo, path_print
